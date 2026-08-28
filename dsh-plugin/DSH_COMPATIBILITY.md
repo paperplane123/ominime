@@ -1,6 +1,6 @@
 # DSH compatibility
 
-This scaffold targets DeepSeek Harness `0.1.1-rc.2` at source commit `6ba46b8e2f107d55f0264987799d7b1fa28a5c44`.
+This scaffold targets DeepSeek Harness `0.1.1-rc.2` at source commit `73f7fe03bcf776e95f7840c7e398a90774290ac6`.
 
 ## Verified extension points
 

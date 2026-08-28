@@ -4,7 +4,7 @@ import { homedir, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-export const PINNED_DSH_COMMIT = '6ba46b8e2f107d55f0264987799d7b1fa28a5c44'
+export const PINNED_DSH_COMMIT = '73f7fe03bcf776e95f7840c7e398a90774290ac6'
 export const PINNED_DSH_VERSION = '0.1.1-rc.2'
 
 export const FRESH_BUILD_ARTIFACTS = [
