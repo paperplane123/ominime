@@ -61,10 +61,10 @@ describe('DSH bundle contract', () => {
   it('pins the executable and documented DSH compatibility baseline', async () => {
     const { PINNED_DSH_COMMIT, PINNED_DSH_VERSION } = await import('../scripts/isolation.mjs')
     expect(PINNED_DSH_VERSION).toBe('0.1.1-rc.2')
-    expect(PINNED_DSH_COMMIT).toBe('7e8db90952ad6cf84cb830b47bd98be90b9b4a88')
+    expect(PINNED_DSH_COMMIT).toBe('6ba46b8e2f107d55f0264987799d7b1fa28a5c44')
     const text = readFileSync(resolve(root, 'DSH_COMPATIBILITY.md'), 'utf8')
     expect(text).toContain('0.1.1-rc.2')
-    expect(text).toContain('7e8db90952ad6cf84cb830b47bd98be90b9b4a88')
+    expect(text).toContain('6ba46b8e2f107d55f0264987799d7b1fa28a5c44')
   })
 
   it('builds the Host and browser artifacts at the exported paths', () => {
