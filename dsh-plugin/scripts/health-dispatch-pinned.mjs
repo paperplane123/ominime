@@ -66,7 +66,7 @@ export async function dispatchHealthPinned({ dshSource } = {}) {
       dshVersion: PINNED_DSH_VERSION,
       dshCommit: PINNED_DSH_COMMIT,
       tool: 'personal_context_health',
-      dispatch: 'rc5 ToolRuntime',
+      dispatch: 'rc2 ToolRuntime',
       invalidErrorInfo: 'absent',
       runtimeSkill: 'kim-chat-history',
     }

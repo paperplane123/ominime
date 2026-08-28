@@ -4,8 +4,8 @@ import { homedir, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-export const PINNED_DSH_COMMIT = '47f943859bef60e4160492346772ded9b24f765a'
-export const PINNED_DSH_VERSION = '0.1.0-rc.5'
+export const PINNED_DSH_COMMIT = '7e8db90952ad6cf84cb830b47bd98be90b9b4a88'
+export const PINNED_DSH_VERSION = '0.1.1-rc.2'
 
 export const FRESH_BUILD_ARTIFACTS = [
   'vendor/cordis/lib/types/index.d.ts',
@@ -83,7 +83,7 @@ export function runDsh(args, {
   })
 }
 
-/** Build ignored RC5 declarations and CLI output from tracked source in a disposable clone. */
+/** Build ignored pinned declarations and CLI output from tracked source in a disposable clone. */
 export async function withFreshPinnedBuild(action, {
   canonicalSource = resolveDshSource(),
   temporaryParent = tmpdir(),
@@ -121,7 +121,7 @@ export async function withFreshPinnedBuild(action, {
     })
     for (const relativePath of FRESH_BUILD_ARTIFACTS) {
       if (!existsSync(join(dshSource, relativePath))) {
-        throw new Error(`fresh RC5 build did not produce required artifact: ${relativePath}`)
+        throw new Error(`fresh pinned build did not produce required artifact: ${relativePath}`)
       }
     }
     verifyPinnedCheckout(dshSource, { runner })

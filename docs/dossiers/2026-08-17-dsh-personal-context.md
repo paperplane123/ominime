@@ -43,8 +43,8 @@ preserved because the replacement has not passed feasibility.
 
 ## S1 Current-system survey
 
-- The [baseline report](../verification/dsh-personal-context-baseline.md)
-  records the existing OmniMe state, test baseline, pinned DSH release, and the
+- The [historical baseline report](../verification/dsh-personal-context-baseline.md)
+  records the initial OmniMe state, test baseline, then-pinned DSH release, and the
   requirement to preserve the legacy database and capture path.
 - [DSH compatibility](../../dsh-plugin/DSH_COMPATIBILITY.md) records the local
   pinned-runtime evidence and the independent portable distribution constraint.
@@ -122,7 +122,7 @@ remain separately gated.
 | Gate or constraint | Decision | Evidence and consequence |
 |---|---|---|
 | G1 local pinned DSH compatibility | `PASS` | [Compatibility report](../../dsh-plugin/DSH_COMPATIBILITY.md); limited to the pinned local runtime. |
-| Portable npm RC5 distribution | `BLOCK` | Independent distribution constraint in the compatibility report; it neither changes nor resolves G2. |
+| Portable npm `0.1.1-rc.2` distribution | `BLOCK` | Independent distribution constraint in the compatibility report; it neither changes nor resolves G2. |
 | G2 source feasibility | **`BLOCKED at G2`** | [Source gate](../verification/chat-source-gate.md); Kim on-demand reads pass, but WeChat and durable Kim ingestion remain blocked. Stop before the original hub Task 7. |
 | G3 data and privacy | `NOT STARTED` | Storage, participation filtering, normalization, and privacy implementation were not started. |
 | G4 feature review | `NOT STARTED` | No downstream feature implementation exists to review. |

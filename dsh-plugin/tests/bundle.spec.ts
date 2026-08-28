@@ -20,7 +20,7 @@ describe('DSH bundle contract', () => {
     const manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'))
     expect(manifest.dsh.bundle.patch).toBe('./cordis.patch.yml')
     expect(manifest.dsh.client.platform).toBe('web')
-    expect(manifest.version).not.toMatch(/[x*]/)
+    expect(manifest.version).toBe('0.1.1')
     expect(manifest.scripts.pretest).toBe('pnpm run build')
     expect(manifest.scripts['typecheck:pinned']).toBe('node scripts/typecheck-pinned.mjs')
     expect(manifest.scripts['smoke:pinned']).toBe('node scripts/smoke-install.mjs')
@@ -35,7 +35,22 @@ describe('DSH bundle contract', () => {
     expect(manifest.files).toContain('lib/probe-kim.js')
     expect(manifest.files).toContain('skills/kim-chat-history/SKILL.md')
     expect(manifest.files).not.toContain('lib/chatkim-live-proof.js')
-    expect(manifest.peerDependencies['@deepseek-ai/dsh-skill']).toBe('0.1.0-rc.5')
+    const expectedDshPeers = [
+      '@deepseek-ai/dsh',
+      '@deepseek-ai/dsh-api-remotes',
+      '@deepseek-ai/dsh-client-runtime',
+      '@deepseek-ai/dsh-client-ui-conversation',
+      '@deepseek-ai/dsh-client-ui-slots',
+      '@deepseek-ai/dsh-skill',
+      '@deepseek-ai/dsh-tools',
+    ]
+    const directDshPeers = Object.entries(manifest.peerDependencies)
+      .filter(([name]) => name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-'))
+    expect(directDshPeers.map(([name]) => name).sort()).toEqual(expectedDshPeers.sort())
+    expect(directDshPeers.every(([, version]) => version === '0.1.1-rc.2')).toBe(true)
+    for (const name of expectedDshPeers) {
+      expect(manifest.peerDependenciesMeta[name]).toEqual({ optional: true })
+    }
     expect(manifest.files).not.toContain('scripts/source-owned')
     expect(manifest.files.some((entry: string) => entry.startsWith('scripts/source-owned/'))).toBe(false)
     expect(manifest.exports['./probe-wechat']).toBeUndefined()
@@ -43,10 +58,13 @@ describe('DSH bundle contract', () => {
     expect(manifest.packageManager).toBe('pnpm@11.7.0')
   })
 
-  it('pins the verified DSH compatibility baseline', () => {
+  it('pins the executable and documented DSH compatibility baseline', async () => {
+    const { PINNED_DSH_COMMIT, PINNED_DSH_VERSION } = await import('../scripts/isolation.mjs')
+    expect(PINNED_DSH_VERSION).toBe('0.1.1-rc.2')
+    expect(PINNED_DSH_COMMIT).toBe('7e8db90952ad6cf84cb830b47bd98be90b9b4a88')
     const text = readFileSync(resolve(root, 'DSH_COMPATIBILITY.md'), 'utf8')
-    expect(text).toContain('0.1.0-rc.5')
-    expect(text).toContain('47f943859bef60e4160492346772ded9b24f765a')
+    expect(text).toContain('0.1.1-rc.2')
+    expect(text).toContain('7e8db90952ad6cf84cb830b47bd98be90b9b4a88')
   })
 
   it('builds the Host and browser artifacts at the exported paths', () => {

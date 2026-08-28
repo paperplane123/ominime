@@ -1,5 +1,7 @@
 # DSH Personal Context Baseline
 
+This is the frozen initial snapshot recorded on 2026-08-17. Its rc5 release and source commit are historical evidence, not the current compatibility target. See the current [DSH compatibility report](../../dsh-plugin/DSH_COMPATIBILITY.md) for the rc2 target and verification result.
+
 - OmniMe base commit: `3ab4993bf5c4f6889212a0aaaf4f475332c680af`
 - DSH release: `0.1.0-rc.5`
 - DSH source commit: `47f943859bef60e4160492346772ded9b24f765a`

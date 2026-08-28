@@ -196,8 +196,8 @@ equivalent bounded change-detection contract across restarts, late arrivals,
 edits, retractions, and source mutations. The current on-demand PASS is evidence,
 not an automatic production-connector approval.
 
-The local pinned DSH RC5 G1 result and this source G2 result are independent:
-G1 is `PASS` for the pinned local runtime, while portable npm RC5 distribution
+The local pinned DSH `0.1.1-rc.2` G1 result and this source G2 result are independent:
+G1 is `PASS` for the pinned local runtime, while portable npm `0.1.1-rc.2` distribution
 is separately `BLOCKED`. Neither result supplies missing live source evidence.
 
 The on-demand Kim Skill and its four restricted tools were implemented. Storage,
