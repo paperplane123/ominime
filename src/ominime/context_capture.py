@@ -237,6 +237,59 @@ def get_focused_element(target_pid: int | None = None):
     return copy_ax_attribute(root, "AXFocusedUIElement")
 
 
+def read_focused_text_via_range(target_pid: int, max_chars: int = 4000) -> str:
+    """Read only a verified, non-secure focused text control via AXStringForRange.
+
+    This is an optional macOS fallback when AXValue is empty (not a general
+    webpage or accessibility-tree text reader). A provider may not implement
+    the parameterized attribute; all unsupported cases fail closed.
+    """
+    if target_pid <= 0 or max_chars <= 0:
+        return ""
+    focused = get_focused_element(target_pid)
+    if focused is None:
+        return ""
+    role = _string_or_none(copy_ax_attribute(focused, "AXRole"))
+    subrole = _string_or_none(copy_ax_attribute(focused, "AXSubrole"))
+    if not is_text_entry_role(role, subrole):
+        return ""
+    if (
+        subrole in SECURE_TEXT_ENTRY_SUBROLES
+        or bool(copy_ax_attribute(focused, "AXProtectedContent"))
+    ):
+        return ""
+
+    count = copy_ax_attribute(focused, "AXNumberOfCharacters")
+    # AX character ranges are UTF-16-based. Never read a whole document.
+    if isinstance(count, bool) or not isinstance(count, (int, float)):
+        return ""
+    count = int(count)
+    if count <= 0 or count > max_chars:
+        return ""
+
+    try:
+        from ApplicationServices import (
+            AXUIElementCopyParameterizedAttributeValue, AXValueCreate,
+            kAXValueCFRangeType,
+        )
+        from CoreFoundation import CFRange
+
+        value = AXValueCreate(kAXValueCFRangeType, CFRange(0, count))
+        if value is None:
+            return ""
+        result = AXUIElementCopyParameterizedAttributeValue(
+            focused, "AXStringForRange", value, None
+        )
+        if not isinstance(result, tuple) or len(result) < 2 or result[0] != 0:
+            return ""
+        text = result[1]
+        if not isinstance(text, str) or len(text) > max_chars:
+            return ""
+        return text
+    except Exception:
+        return ""
+
+
 def walk_ax_hierarchy(element, max_depth: int = 12) -> list[dict]:
     hierarchy = []
     current = element
