@@ -210,6 +210,42 @@
         .content-text::-webkit-scrollbar-track { background: var(--bg-secondary); }
         .content-text::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 
+        /* 每次提交单独显示，保留消息边界和原始换行。 */
+        .submission-list {
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            background: var(--bg-primary);
+            max-height: 520px;
+            overflow-y: auto;
+        }
+        .submission-entry {
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .submission-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            padding: 8px 12px;
+            background: var(--bg-card);
+            color: var(--text-secondary);
+            font-size: 12px;
+        }
+        .submission-body {
+            padding: 12px;
+            color: var(--text-secondary);
+            line-height: 1.7;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+        }
+        .submission-count-only {
+            color: var(--text-muted);
+            font-style: italic;
+        }
+
         /* 图表 */
         .chart-container { height: 300px; }
         .hourly-chart {
@@ -906,23 +942,50 @@
                     return;
                 }
 
-                container.innerHTML = data.map((app, index) => `
-                    <div class="app-content-item ${index === 0 ? 'expanded' : ''}" onclick="toggleAppContent(this)">
-                        <div class="app-content-header">
-                            <div class="app-content-info">
-                                <div class="app-content-icon">${appIcons[app.display_name] || appIcons.default}</div>
-                                <div>
-                                    <div class="app-content-name">${escapeHtml(app.display_name)}</div>
-                                    <div class="app-content-stats">${app.total_chars.toLocaleString()} 字符 · ${app.session_count} 个片段</div>
+                container.innerHTML = data.map((app, index) => {
+                    const sessions = (app.sessions || []).map(session => {
+                        const content = session.content || '';
+                        const hasText = content.trim().length > 0;
+                        const status = hasText
+                            ? `${session.char_count} 字符`
+                            : session.count_only
+                                ? `仅计数 · 约 ${session.char_count} 次按键`
+                                : '未保存正文';
+                        return `
+                            <article class="submission-entry">
+                                <div class="submission-meta">
+                                    <time>${escapeHtml(session.time)}</time>
+                                    <span>${escapeHtml(status)}</span>
                                 </div>
+                                <div class="submission-body">${hasText
+                                    ? escapeHtml(content)
+                                    : '<span class="submission-count-only">本次输入未取得可信正文，无法从计数还原。</span>'}</div>
+                            </article>
+                        `;
+                    }).join('');
+                    const recordedChars = app.recorded_text_chars || 0;
+                    const estimatedKeys = app.estimated_key_count || 0;
+                    const stats = `原文 ${recordedChars} 字符` +
+                        (estimatedKeys ? ` · 未取到正文约 ${estimatedKeys} 次按键` : '') +
+                        ` · ${app.session_count} 个片段`;
+                    return `
+                        <div class="app-content-item ${index === 0 ? 'expanded' : ''}" onclick="toggleAppContent(this)">
+                            <div class="app-content-header">
+                                <div class="app-content-info">
+                                    <div class="app-content-icon">${appIcons[app.display_name] || appIcons.default}</div>
+                                    <div>
+                                        <div class="app-content-name">${escapeHtml(app.display_name)}</div>
+                                        <div class="app-content-stats">${escapeHtml(stats)}</div>
+                                    </div>
+                                </div>
+                                <div class="app-content-toggle">▼</div>
                             </div>
-                            <div class="app-content-toggle">▼</div>
+                            <div class="app-content-body">
+                                <div class="submission-list">${sessions || '<div class="submission-count-only">暂无输入记录</div>'}</div>
+                            </div>
                         </div>
-                        <div class="app-content-body">
-                            <div class="content-text">${escapeHtml(app.full_content) || '(无内容)'}</div>
-                        </div>
-                    </div>
-                `).join('');
+                    `;
+                }).join('');
             } catch (error) {
                 console.error('加载内容失败:', error);
                 container.innerHTML = '<div class="empty-state"><div class="icon">❌</div><p>加载失败</p></div>';
