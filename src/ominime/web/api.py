@@ -770,7 +770,7 @@ async def get_content_by_app(target_date: Optional[str] = None):
     for group in sorted(app_contents.values(), key=lambda entry: -entry["total_chars"]):
         # 保留旧响应字段供已有客户端读取，使用段落边界而非中文直接粘连。
         group["full_content"] = "\n\n".join(
-            row["content"] for row in group["sessions"] if row["content"].strip()
+            row["content"] for row in group["sessions"] if row["content"]
         )
         group["session_count"] = len(group["sessions"])
         result.append(group)
