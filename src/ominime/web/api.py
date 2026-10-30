@@ -716,9 +716,9 @@ async def export_today_to_obsidian(include_raw: bool = True, include_ai: bool = 
 
 @app.get("/api/content/by-app")
 async def get_content_by_app(target_date: Optional[str] = None):
-    """获取按应用分组的完整输入内容"""
+    """按应用返回每次输入的独立记录，不将不同提交拼成一句话。"""
     db = get_database()
-    
+
     if target_date:
         try:
             report_date = datetime.strptime(target_date, "%Y-%m-%d").date()
@@ -726,61 +726,49 @@ async def get_content_by_app(target_date: Optional[str] = None):
             raise HTTPException(status_code=400, detail="日期格式错误")
     else:
         report_date = business_today()
-    
+
     records = db.get_records_by_date(report_date)
-    
-    # 按应用分组
     app_contents = {}
-    for r in records:
-        display_name = r.display_name
-        if display_name not in app_contents:
-            app_contents[display_name] = {
-                "app_name": r.app_name,
-                "display_name": display_name,
+    for record in records:
+        # 同名应用可能有不同 bundle ID，避免归并到同一组。
+        key = record.app_bundle_id or record.app_name or record.display_name
+        if key not in app_contents:
+            app_contents[key] = {
+                "app_name": record.app_name,
+                "display_name": record.display_name,
                 "total_chars": 0,
-                "sessions": []
+                "recorded_text_chars": 0,
+                "estimated_key_count": 0,
+                "sessions": [],
             }
-        
-        app_contents[display_name]["total_chars"] += r.char_count
-        app_contents[display_name]["sessions"].append({
-            "time": r.timestamp.strftime("%H:%M:%S"),
-            "content": r.content or "",
-            "char_count": r.char_count,
+
+        group = app_contents[key]
+        content = record.content or ""
+        has_text = bool(content.strip())
+        count_only = not has_text and record.char_count > 0
+        group["total_chars"] += record.char_count
+        if has_text:
+            group["recorded_text_chars"] += len(content)
+        if count_only:
+            group["estimated_key_count"] += record.char_count
+        group["sessions"].append({
+            "id": record.id,
+            "timestamp": record.timestamp.isoformat(),
+            "time": record.timestamp.strftime("%H:%M:%S"),
+            "content": content,
+            "char_count": record.char_count,
+            "count_only": count_only,
         })
-    
-    # 合并每个应用的内容为完整文本
+
     result = []
-    for app_name, data in sorted(app_contents.items(), key=lambda x: -x[1]["total_chars"]):
-        # 合并所有 session 的内容（智能处理空格和换行）
-        full_content = ""
-        for session in data["sessions"]:
-            content = session["content"] or ""
-            if content:
-                # 如果当前内容以换行开头或上一个内容以换行结尾，直接拼接
-                # 否则检查是否需要添加空格（英文之间）或直接拼接（中文）
-                if full_content and not full_content.endswith('\n') and not content.startswith('\n'):
-                    # 检查是否都是 ASCII（英文），如果是则加空格
-                    last_char = full_content[-1] if full_content else ''
-                    first_char = content[0] if content else ''
-                    
-                    # 如果都是 ASCII 字母/数字，可能需要空格
-                    # 如果有一方是中文，不加空格
-                    if last_char.isascii() and first_char.isascii() and last_char.isalnum() and first_char.isalnum():
-                        full_content += " " + content
-                    else:
-                        full_content += content
-                else:
-                    full_content += content
-        
-        result.append({
-            "app_name": data["app_name"],
-            "display_name": data["display_name"],
-            "total_chars": data["total_chars"],
-            "session_count": len(data["sessions"]),
-            "full_content": full_content,
-            "sessions": data["sessions"],
-        })
-    
+    for group in sorted(app_contents.values(), key=lambda entry: -entry["total_chars"]):
+        # 保留旧响应字段供已有客户端读取，使用段落边界而非中文直接粘连。
+        group["full_content"] = "\n\n".join(
+            row["content"] for row in group["sessions"] if row["content"].strip()
+        )
+        group["session_count"] = len(group["sessions"])
+        result.append(group)
+
     return result
 
 
