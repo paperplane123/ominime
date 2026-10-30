@@ -750,7 +750,7 @@ async def get_content_by_app(target_date: Optional[str] = None):
 
         group = app_contents[key]
         content = record.content or ""
-        has_text = bool(content.strip())
+        has_text = bool(content)
         count_only = not has_text and record.char_count > 0
         group["total_chars"] += record.char_count
         if has_text:
