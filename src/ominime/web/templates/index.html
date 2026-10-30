@@ -979,8 +979,8 @@
                         (estimatedKeys ? ` · 未取到正文约 ${estimatedKeys} 次按键` : '') +
                         ` · ${app.session_count} 个片段`;
                     return `
-                        <div class="app-content-item ${index === 0 ? 'expanded' : ''}" onclick="toggleAppContent(this)">
-                            <div class="app-content-header">
+                        <div class="app-content-item ${index === 0 ? 'expanded' : ''}">
+                            <div class="app-content-header" onclick="toggleAppContent(this.parentElement)">
                                 <div class="app-content-info">
                                     <div class="app-content-icon">${appIcons[app.display_name] || appIcons.default}</div>
                                     <div>
