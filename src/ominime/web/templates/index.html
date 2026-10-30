@@ -221,6 +221,8 @@
             overflow-y: auto;
         }
         .submission-entry {
+            /* Never shrink 40+ records to fit the scrolling container's max-height. */
+            flex: 0 0 auto;
             border: 1px solid var(--border);
             border-radius: 10px;
             overflow: hidden;
