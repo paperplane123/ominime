@@ -143,3 +143,81 @@ def test_capture_reports_systemwide_and_process_focus_unavailable(monkeypatch):
 
     assert result.capture_status == "degraded"
     assert result.capture_error == "focused element unavailable (pid 123)"
+
+
+def test_focused_text_range_fallback_uses_only_verified_editable_field(monkeypatch):
+    """A Safari text input may support AXStringForRange even without AXValue."""
+    import sys
+    from types import ModuleType
+
+    focused = object()
+    monkeypatch.setattr(context_capture, "get_focused_element", lambda pid: focused)
+    attrs = {
+        "AXRole": "AXTextField",
+        "AXSubrole": None,
+        "AXProtectedContent": False,
+        "AXNumberOfCharacters": 6,
+    }
+    monkeypatch.setattr(
+        context_capture, "copy_ax_attribute",
+        lambda element, attr: attrs.get(attr),
+    )
+    calls = []
+    ax = ModuleType("ApplicationServices")
+    ax.kAXValueCFRangeType = 4
+    ax.AXValueCreate = lambda typ, value: (typ, value)
+
+    def copy_parameterized(element, name, value, _out):
+        calls.append((element, name, value))
+        return (0, "今天天气不错")
+
+    ax.AXUIElementCopyParameterizedAttributeValue = copy_parameterized
+    cf = ModuleType("CoreFoundation")
+    cf.CFRange = lambda start, length: (start, length)
+    monkeypatch.setitem(sys.modules, "ApplicationServices", ax)
+    monkeypatch.setitem(sys.modules, "CoreFoundation", cf)
+
+    content = context_capture.read_focused_text_via_range(123)
+    assert content == "今天天气不错"
+    assert calls == [(focused, "AXStringForRange", (4, (0, 6)))]
+
+
+def test_focused_text_range_never_reads_password_or_page_body(monkeypatch):
+    focused = object()
+    monkeypatch.setattr(context_capture, "get_focused_element", lambda pid: focused)
+    attrs = {
+        "AXRole": "AXTextField",
+        "AXSubrole": "AXSecureTextField",
+        "AXProtectedContent": True,
+        "AXNumberOfCharacters": 7,
+    }
+    reads = []
+    monkeypatch.setattr(
+        context_capture, "copy_ax_attribute",
+        lambda element, attr: reads.append(attr) or attrs.get(attr),
+    )
+
+    assert context_capture.read_focused_text_via_range(123) == ""
+    assert "AXNumberOfCharacters" not in reads
+    attrs["AXRole"] = "AXWebArea"
+    attrs["AXSubrole"] = None
+    attrs["AXProtectedContent"] = False
+    reads.clear()
+    assert context_capture.read_focused_text_via_range(123) == ""
+    assert "AXNumberOfCharacters" not in reads
+
+
+def test_focused_text_range_rejects_large_input(monkeypatch):
+    focused = object()
+    monkeypatch.setattr(context_capture, "get_focused_element", lambda pid: focused)
+    attrs = {
+        "AXRole": "AXTextArea",
+        "AXSubrole": None,
+        "AXProtectedContent": False,
+        "AXNumberOfCharacters": 4001,
+    }
+    monkeypatch.setattr(
+        context_capture, "copy_ax_attribute",
+        lambda element, attr: attrs.get(attr),
+    )
+    assert context_capture.read_focused_text_via_range(123, max_chars=4000) == ""

@@ -3027,3 +3027,70 @@ def configure_listener_context(listener, *, status="degraded", secure=False):
         "capture_status": context.capture_status,
         "capture_error": context.capture_error,
     }
+
+
+def test_safari_enter_uses_verified_ax_range_when_ax_value_is_empty(monkeypatch):
+    keyboard_listener, _ = import_keyboard_listener(monkeypatch)
+    from ominime.context_capture import CapturedContext, focused_field_identity
+
+    events = []
+    listener = keyboard_listener.KeyboardListener(events.append)
+    context = CapturedContext(
+        focused_role="AXTextField",
+        focused_identifier="prompt-test",
+        window_title="Test",
+        focused_value="",
+        capture_status="ok",
+    )
+    app_name, bundle_id = "Safari", "com.apple.Safari"
+    key = listener._fallback_buffer_key(app_name, bundle_id)
+    listener._active_field_ids[key] = focused_field_identity(context)
+    calls = []
+    monkeypatch.setattr(
+        keyboard_listener, "read_focused_text_via_range",
+        lambda pid, max_chars: calls.append((pid, max_chars)) or "今天天气不错",
+    )
+
+    listener._emit_submission_snapshot(
+        None, app_name=app_name, bundle_id=bundle_id,
+        event_type=keyboard_listener.kCGEventKeyDown, target_pid=4321,
+        captured_context=context,
+    )
+
+    assert calls == [(4321, keyboard_listener.MAX_TRUSTED_SUBMISSION_CHARS)]
+    assert len(events) == 1
+    assert events[0].character == "今天天气不错"
+    assert events[0].modifiers["fallback_source"] == "ax_range"
+    assert events[0].modifiers["capture_diagnostics"]["ax_range_available"] is True
+
+
+def test_safari_range_fallback_refuses_unverified_field_switch(monkeypatch):
+    keyboard_listener, _ = import_keyboard_listener(monkeypatch)
+    from ominime.context_capture import CapturedContext
+
+    events = []
+    diagnostics = []
+    listener = keyboard_listener.KeyboardListener(
+        events.append, diagnostics_callback=diagnostics.append
+    )
+    context = CapturedContext(
+        focused_role="AXTextField",
+        focused_identifier="different-field",
+        window_title="Test",
+        focused_value="",
+        capture_status="ok",
+    )
+    key = listener._fallback_buffer_key("Safari", "com.apple.Safari")
+    listener._active_field_ids[key] = "id:Test:previous-field"
+
+    def forbidden_range(*args, **kwargs):
+        raise AssertionError("must not copy text from an unverified field")
+
+    monkeypatch.setattr(keyboard_listener, "read_focused_text_via_range", forbidden_range)
+    listener._emit_submission_snapshot(
+        None, app_name="Safari", bundle_id="com.apple.Safari",
+        event_type=keyboard_listener.kCGEventKeyDown, target_pid=4321,
+        captured_context=context,
+    )
+    assert events == []
+    assert diagnostics[-1]["decision_reason"] == "no_trusted_content"

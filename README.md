@@ -348,6 +348,26 @@ curl 'http://127.0.0.1:8001/api/capture/diagnostics?limit=20'
 - `suspected_whole_document`：读取内容异常大，疑似整篇文档或整页内容。
 - `no_trusted_content`：没有找到可信的提交内容。
 
+### Safari 部分输入只记录按键数
+
+Safari 网页输入控件不一定始终提供 `AXValue`。当前实验分支在
+`AXValue` 为空时，会尝试 macOS 的 `AXStringForRange` 参数化属性，
+但**仅在焦点已验证属于同一非密码文本输入控件、文本长度受限时启用**。
+不支持的网页仍可能保存为仅计数，不能从按键数还原原始中文。
+
+检查 Safari 的记录原因：
+
+```bash
+curl 'http://127.0.0.1:8001/api/capture/diagnostics?app_bundle_id=com.apple.Safari&limit=50'
+```
+
+`diagnostics` 中的 `verified_text_entry`、`ax_value_nonempty`、
+`snapshot_available`、`snapshot_same_field`、`ax_range_attempted`、
+`ax_range_available` 只记录布尔状态，不包含所输入的文字或网页内容。
+`selected_source=ax_range` 表示备用接口成功读取。
+`focused_role=null` 在该版本是隐私限制下的预期行为，不能据此认定焦点丢失。
+这些字段只对新采集的 Safari 记录生效，旧诊断不会补全。
+
 ### 没有记录到内容
 
 1. 确认菜单栏不是 `⌨️ ⏸` 或 `⌨️ ⚠`。
