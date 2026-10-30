@@ -89,3 +89,21 @@ def test_dashboard_does_not_present_unmeasured_active_time():
 
     assert "活跃时间" not in html
     assert "todayTime" not in html
+
+
+def test_submission_cards_are_not_shrunk_inside_scroll_container():
+    """Regression: 40+ rows must not collapse to thin horizontal stripes."""
+    import re
+
+    html = TEMPLATE.read_text(encoding="utf-8")
+    match = re.search(r"\\.submission-entry\\s*\\{([^}]*)\\}", html)
+    assert match is not None
+    assert "flex: 0 0 auto" in match.group(1)
+    assert "overflow-y: auto" in html
+
+
+def test_clicking_submission_text_does_not_collapse_app():
+    html = TEMPLATE.read_text(encoding="utf-8")
+
+    assert 'onclick="toggleAppContent(this.parentElement)"' in html
+    assert 'onclick="toggleAppContent(this)"' not in html
