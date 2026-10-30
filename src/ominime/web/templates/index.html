@@ -246,6 +246,14 @@
             font-style: italic;
         }
 
+        .submission-diagnostic {
+            padding: 10px 15px;
+            color: var(--text-muted);
+            font-size: 12px;
+            line-height: 1.8;
+        }
+        .submission-diagnostic a { color: var(--accent); }
+
         /* 图表 */
         .chart-container { height: 300px; }
         .hourly-chart {
@@ -982,6 +990,12 @@
                             </div>
                             <div class="app-content-body">
                                 <div class="submission-list">${sessions || '<div class="submission-count-only">暂无输入记录</div>'}</div>
+                                ${estimatedKeys && app.app_bundle_id ? `
+                                    <div class="submission-diagnostic">
+                                        有记录仅能估算按键数，不能还原输入正文。
+                                        <a href="/api/capture/diagnostics?app_bundle_id=${encodeURIComponent(app.app_bundle_id)}&limit=50"
+                                           target="_blank" rel="noopener" onclick="event.stopPropagation()">查看本应用最近的采集诊断</a>
+                                    </div>` : ''}
                             </div>
                         </div>
                     `;
