@@ -1848,9 +1848,9 @@ class KeyboardListener:
             return
 
         text_entry_context = is_text_entry_context(context)
-        self._active_field_ids[self._fallback_buffer_key(app_name, bundle_id)] = (
-            current_field_id
-        )
+        field_key = self._fallback_buffer_key(app_name, bundle_id)
+        previously_active_field_id = self._active_field_ids.get(field_key)
+        self._active_field_ids[field_key] = current_field_id
         ax_content = ""
         if text_entry_context:
             focused_value = getattr(context, "focused_value", None)
@@ -1905,7 +1905,16 @@ class KeyboardListener:
                 "ax_range_attempted": False,
                 "ax_range_available": False,
             }
-            if text_entry_context and not content and target_pid and target_pid > 0:
+            # Only trust the range reader if the previous typing event and
+            # this Enter belong to the same, identifiable focused field.
+            if (
+                text_entry_context
+                and not content
+                and target_pid is not None
+                and target_pid > 0
+                and current_field_id is not None
+                and previously_active_field_id == current_field_id
+            ):
                 capture_diagnostics["ax_range_attempted"] = True
                 range_content = normalize_submission_text(
                     read_focused_text_via_range(
