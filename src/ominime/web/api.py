@@ -265,10 +265,15 @@ async def get_health():
 
 
 @app.get("/api/capture/diagnostics")
-async def get_capture_diagnostics(limit: int = Query(default=50, ge=1, le=500)):
-    """获取最近的 Enter 捕获决策诊断。"""
+async def get_capture_diagnostics(
+    limit: int = Query(default=50, ge=1, le=500),
+    app_bundle_id: Optional[str] = None,
+):
+    """获取最近的 Enter 捕获决策诊断，可按应用筛选。"""
     db = get_database()
-    rows = db.get_recent_capture_diagnostics(limit=limit)
+    rows = db.get_recent_capture_diagnostics(
+        limit=limit, app_bundle_id=app_bundle_id
+    )
     return {
         "total": len(rows),
         "diagnostics": [_serialize_capture_diagnostic(row) for row in rows],
@@ -735,6 +740,7 @@ async def get_content_by_app(target_date: Optional[str] = None):
         if key not in app_contents:
             app_contents[key] = {
                 "app_name": record.app_name,
+                "app_bundle_id": record.app_bundle_id,
                 "display_name": record.display_name,
                 "total_chars": 0,
                 "recorded_text_chars": 0,
