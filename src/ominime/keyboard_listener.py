@@ -1884,6 +1884,40 @@ class KeyboardListener:
         fallback_source = None
         physical_key_count = None
         capture_diagnostics = None
+
+        if bundle_id == "com.apple.Safari":
+            # Do not persist text or AX element identity in diagnostics.
+            snapshot = self._recent_text_snapshots.get(
+                self._fallback_buffer_key(app_name, bundle_id)
+            )
+            snapshot_field_id = (
+                snapshot[2] if snapshot is not None and len(snapshot) > 2 else None
+            )
+            capture_diagnostics = {
+                "verified_text_entry": bool(text_entry_context),
+                "ax_value_nonempty": bool(ax_content),
+                "snapshot_available": snapshot is not None,
+                "snapshot_same_field": bool(
+                    current_field_id is not None
+                    and snapshot_field_id is not None
+                    and current_field_id == snapshot_field_id
+                ),
+                "ax_range_attempted": False,
+                "ax_range_available": False,
+            }
+            if text_entry_context and not content and target_pid and target_pid > 0:
+                capture_diagnostics["ax_range_attempted"] = True
+                range_content = normalize_submission_text(
+                    read_focused_text_via_range(
+                        target_pid, max_chars=MAX_TRUSTED_SUBMISSION_CHARS
+                    ),
+                    app_name=app_name,
+                    bundle_id=bundle_id,
+                )
+                if range_content:
+                    content = range_content
+                    fallback_source = "ax_range"
+                    capture_diagnostics["ax_range_available"] = True
         if (
             text_entry_context
             and fallback_source != "doubao_candidate_text"
