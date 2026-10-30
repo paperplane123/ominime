@@ -953,7 +953,7 @@
                 container.innerHTML = data.map((app, index) => {
                     const sessions = (app.sessions || []).map(session => {
                         const content = session.content || '';
-                        const hasText = content.trim().length > 0;
+                        const hasText = content.length > 0;
                         const status = hasText
                             ? `${session.char_count} 字符`
                             : session.count_only
