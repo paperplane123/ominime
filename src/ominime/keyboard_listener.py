@@ -64,6 +64,7 @@ from .context_capture import (
     focused_field_identity,
     is_secure_text_entry_context,
     is_text_entry_context,
+    read_focused_text_via_range,
 )
 from .input_snapshot import format_submission_terminal_notice, normalize_submission_text
 from .ime_candidate_capture import (
@@ -1150,10 +1151,13 @@ class KeyboardListener:
         return content
 
     def _record_recent_text_snapshot(
-        self, app_name: str, bundle_id: str, *, clear_on_empty: bool = False
+        self, app_name: str, bundle_id: str, *, clear_on_empty: bool = False,
+        target_pid: int = 0,
     ):
         key = self._fallback_buffer_key(app_name, bundle_id)
-        context = self._capture_focused_context(max_depth=1)
+        context = self._capture_focused_context(
+            max_depth=1, target_pid=target_pid if target_pid > 0 else None
+        )
         if not is_text_entry_context(context):
             self._recent_text_snapshots.pop(key, None)
             return
@@ -1174,6 +1178,14 @@ class KeyboardListener:
         focused_value = getattr(context, "focused_value", None)
         if not isinstance(focused_value, str):
             focused_value = self._get_focused_text_snapshot()
+        if (
+            not focused_value
+            and bundle_id == "com.apple.Safari"
+            and target_pid > 0
+        ):
+            focused_value = read_focused_text_via_range(
+                target_pid, max_chars=MAX_TRUSTED_SUBMISSION_CHARS
+            )
         content = normalize_submission_text(
             focused_value,
             app_name=app_name,
@@ -2091,6 +2103,7 @@ class KeyboardListener:
                     app_name,
                     bundle_id,
                     clear_on_empty=keycode in (51, 117),
+                    target_pid=application_pid,
                 )
                 if bundle_id in POST_SEND_CHAT_BUNDLE_IDS and keycode == 9:
                     self._record_post_send_paste_validation(app_name, bundle_id)
