@@ -302,7 +302,7 @@ class Database:
             cursor.execute("""
                 SELECT * FROM input_records 
                 WHERE timestamp >= ? AND timestamp < ?
-                ORDER BY timestamp
+                ORDER BY timestamp, id
             """, (start.isoformat(), end.isoformat()))
             
             return [self._row_to_input_record(row) for row in cursor.fetchall()]
@@ -533,18 +533,29 @@ class Database:
             ))
             return cursor.lastrowid
 
-    def get_recent_capture_diagnostics(self, limit: int = 50) -> List[Dict]:
-        """查询最近的 Enter 捕获决策诊断。"""
+    def get_recent_capture_diagnostics(
+        self, limit: int = 50, app_bundle_id: Optional[str] = None
+    ) -> List[Dict]:
+        """按应用可选筛选最近的捕获诊断，避免高频其他应用淹没 Safari 记录。"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT *
-                FROM capture_diagnostics
-                ORDER BY timestamp DESC, id DESC
-                LIMIT ?
-            """, (limit,))
+            if app_bundle_id:
+                cursor.execute("""
+                    SELECT *
+                    FROM capture_diagnostics
+                    WHERE app_bundle_id = ?
+                    ORDER BY timestamp DESC, id DESC
+                    LIMIT ?
+                """, (app_bundle_id, limit))
+            else:
+                cursor.execute("""
+                    SELECT *
+                    FROM capture_diagnostics
+                    ORDER BY timestamp DESC, id DESC
+                    LIMIT ?
+                """, (limit,))
             return [dict(row) for row in cursor.fetchall()]
-    
+
     # ===== 每日汇总操作 =====
     
     def save_daily_summary(self, summary: DailySummary):

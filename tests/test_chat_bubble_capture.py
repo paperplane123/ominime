@@ -3,9 +3,11 @@ from datetime import datetime
 import pytest
 
 from ominime.chat_bubble_capture import (
+    GENERIC_BUBBLE_PROFILE,
     KIM_BUBBLE_PROFILE,
     WECHAT_BUBBLE_PROFILE,
     VisualBubbleSource,
+    bubble_profile_for_bundle,
 )
 from ominime.chat_window_capture import WindowFrame
 from ominime.kim_composer_capture import NormalizedRect, RecognizedLine
@@ -317,6 +319,54 @@ def test_wechat_visual_source_accepts_window_recreation_with_same_session_anchor
     assert result.content == "T"
     assert result.source == "wechat_postsend_ocr"
     assert result.window_id == 42
+
+
+def test_generic_profile_reserves_header_and_composer_bands():
+    bounds = GENERIC_BUBBLE_PROFILE.search_bounds(_frame(width=1000, height=800))
+
+    assert (bounds.x, bounds.y, bounds.width, bounds.height) == (0.0, 0.18, 1.0, 0.78)
+
+
+def test_bubble_profile_registry_routes_known_and_unknown_bundles():
+    assert bubble_profile_for_bundle("com.tencent.xinWeChat") is WECHAT_BUBBLE_PROFILE
+    assert bubble_profile_for_bundle("com.tencent.WeChat") is WECHAT_BUBBLE_PROFILE
+    assert bubble_profile_for_bundle("Kem") is KIM_BUBBLE_PROFILE
+    assert bubble_profile_for_bundle("com.electron.kim") is KIM_BUBBLE_PROFILE
+    assert bubble_profile_for_bundle("md.obsidian") is GENERIC_BUBBLE_PROFILE
+    assert bubble_profile_for_bundle("") is GENERIC_BUBBLE_PROFILE
+
+
+def test_visual_source_generic_profile_emits_generic_source():
+    line = RecognizedLine("最终文本", 0.80, 0.36, 0.12, 0.04)
+
+    result = _source(
+        (line,),
+        (NormalizedRect(0.78, 0.34, 0.16, 0.09),),
+    ).read(
+        _intent(
+            app_name="随便什么",
+            bundle_id="com.example.unknown",
+            validation_text="最终文本",
+        )
+    )
+
+    assert result.content == "最终文本"
+    assert result.source == "generic_postsend_ocr"
+
+
+def test_visual_source_rejects_window_recreation_for_unknown_bundle():
+    line = RecognizedLine("T", 0.80, 0.36, 0.12, 0.04)
+    source = _source(
+        (line,),
+        (NormalizedRect(0.78, 0.34, 0.16, 0.09),),
+        current=_frame(window_id=99),
+    )
+
+    result = source.read(
+        _intent(app_name="随便什么", bundle_id="com.example.unknown", validation_text="T")
+    )
+
+    assert result.failure_reason == "window_identity_mismatch"
 
 
 def test_visual_source_rejects_same_window_conversation_switch():

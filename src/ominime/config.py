@@ -122,6 +122,10 @@ class AppConfig:
 
     # Enter 提交上下文捕获（仅文字，不再截屏）
     capture_context_on_enter: bool = True
+
+    # 发送后气泡捕获是否对全部应用默认开启。
+    # False 时退回 Kim/微信白名单模式（回滚开关）。
+    post_send_chat_all_apps: bool = True
     
     def __post_init__(self):
         """初始化后创建必要的目录"""
@@ -153,6 +157,7 @@ class AppConfig:
             "count_unreadable_submissions": self.count_unreadable_submissions,
             "capture_key_event_text_fallback": self.capture_key_event_text_fallback,
             "capture_context_on_enter": self.capture_context_on_enter,
+            "post_send_chat_all_apps": self.post_send_chat_all_apps,
         }
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(config_data, f, ensure_ascii=False, indent=2)
@@ -197,6 +202,7 @@ class AppConfig:
                     config.capture_key_event_text_fallback,
                 )
                 config.capture_context_on_enter = data.get("capture_context_on_enter", config.capture_context_on_enter)
+                config.post_send_chat_all_apps = data.get("post_send_chat_all_apps", config.post_send_chat_all_apps)
 
         # An explicit environment value is the final runtime override. This is
         # also what the local-model setup wizard writes to .env.

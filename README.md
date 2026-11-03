@@ -12,7 +12,7 @@ OmniMe 以一次按下 Enter 的提交为记录边界。它不会把连续的原
 
 - **提交级输入记录**：在文本输入框中按 Enter 时保存本次提交，不记录普通按键流。
 - **中英文与输入法处理**：优先记录最终提交文本，过滤输入法预编辑过程，支持中英文混合内容。
-- **Kim / 微信发送后确认**：Kim 与微信的 Enter 原样交给应用；消息出现后，OmniMe 才通过受约束的本地 AX 或 Vision 读取最终发送气泡。无法证明气泡属于本次发送时直接跳过，不回退保存输入区草稿或聊天上下文。
+- **发送后气泡确认（默认全应用）**：在聊天类应用中按 Enter 时，Enter 原样交给应用；消息出现后，OmniMe 才通过受约束的本地 AX 或 Vision 读取最终发送气泡。Kim 与微信使用逐应用调过的专属搜索区，其余**有聊天窗基线**的应用落到保守的通用搜索区（整窗宽度、跳过标题带与输入带、右对齐新气泡启发）。气泡路线只有当 OCR 气泡文本与本次提交文本规范化后**完全一致**才写库；无法证明气泡属于本次发送时 Kim/微信直接跳过、不回退保存输入区草稿。对**没有聊天窗基线的普通应用**（非聊天，如编辑器、浏览器输入框、IDE 聊天框），Enter 会自动回退到通用提交捕获——按 Enter 保存焦点输入框当前值，因此全应用泛化不会丢失常规输入记录。可把 `post_send_chat_all_apps` 设为 `false` 退回仅 Kim/微信的白名单模式。
 - **可信输入保护**：焦点不在文本输入控件、安全输入框、编辑器换行和异常大的整篇内容都会跳过，避免误记网页正文、聊天历史、文档或密码。
 - **不可读输入降级**：无法安全读取原文时，可以只保存字符数，不保存拼音或不可信内容。
 - **应用与业务日统计**：按应用、会话、小时和日期查看输入量；业务日时区可配置。
@@ -225,24 +225,26 @@ Kim 与微信使用独立的发送后链路：EventTap 只把原始 keyDown/keyU
 - `count-only` 模式不保存提交原文，只保存字符数和不含窗口、控件层级的捕获诊断。
 - 无法可信读取原文时，系统会在有足够输入证据时只记录字符数；证据不足或内容可能不安全时仍会跳过。
 - 捕获流程不会通过通用 `Cmd+A` / `Cmd+C` 读取输入框，因此不会改动当前选择或把整页复制到剪贴板。
-- Kim/微信基线与发送后帧最多在进程内存中短暂存在；图片不序列化、不写数据库、不写日志、不写诊断，任务结束即释放。
-- Kim/微信发送后捕获只使用本机 macOS AX、Quartz 与 Vision，不调用远程模型。它不集成、不探测 Chatlog/5030，也不直接读取微信数据库。
+- 发送后捕获（含 Kim/微信与通用应用）的基线与发送后帧最多在进程内存中短暂存在；图片不序列化、不写数据库、不写日志、不写诊断，任务结束即释放。
+- 发送后捕获只使用本机 macOS AX、Quartz 与 Vision，不调用远程模型。它不集成、不探测 Chatlog/5030，也不直接读取微信数据库。
 - 本地 Ollama 或本地 Qwen 后端可以在本机完成分析。
 - 可以随时从菜单栏暂停记录，或通过 `ignored_apps` 排除应用。
 
 > 输入记录可能包含聊天、命令、笔记等敏感内容。OmniMe 的分析后端仅允许使用本机模型。
 
-### Kim / 微信发送后诊断与验收
+### 发送后诊断与验收（默认全应用）
 
 常见失败码包括：
 
 - `post_send_queue_full`、`capture_expired`、`source_read_timeout`：有界队列、任务期限或本地来源超时；消息发送本身不受影响。
-- `baseline_unavailable`、`window_identity_mismatch`、`session_anchor_mismatch`：缺少可信基线，或发送后窗口/会话已变化。
+- `baseline_unavailable`、`window_identity_mismatch`、`session_anchor_mismatch`：缺少可信基线，或发送后窗口/会话已变化（非聊天应用遇 `baseline_unavailable` 会回退到通用提交捕获，不会丢记录）。
 - `ocr_validation_unavailable`、`ocr_validation_mismatch`、`ocr_unstable`：无法用本地输入摘要确认 OCR，或连续采样不稳定。
 - `duplicate_message_identity`：结构化来源重复返回已处理的同一消息节点。
 - `post_send_target_changed`、`post_send_window_changed`、`post_send_session_changed`：完成时前台应用、窗口或会话已切换，因此拒绝写入。
 
-真实验收时，在 Kim 与微信分别发送唯一的短中文、英文/数字、多行、粘贴、豆包候选、连续两条相同文本和快速连续消息。逐条确认数据库正文完全一致、`fallback_source` 为对应的 `*_postsend_ax` 或 `*_postsend_ocr`、仅有一条记录、没有新增 `submission_contexts` 行或截图文件。再测试发送后立即切换会话、切换应用或最小化窗口：应只有命名失败诊断，不能写入旧消息、对方消息或其他会话内容，且应用仍正常收到每一次 Enter。
+真实验收时，在 Kim 与微信分别发送唯一的短中文、英文/数字、多行、粘贴、豆包候选、连续两条相同文本和快速连续消息。逐条确认数据库正文完全一致、`fallback_source` 为对应的 `*_postsend_ax` 或 `*_postsend_ocr`（Kim 为 `kim_postsend_*`、微信为 `wechat_postsend_*`、其余应用为 `generic_postsend_*`）、仅有一条记录、没有新增 `submission_contexts` 行或截图文件。再选一个非聊天应用（如备忘录、编辑器或 IDE 聊天框）验证：它没有聊天窗基线，Enter 应回退到通用提交捕获并正常写入焦点输入框文本（而不是走气泡）。测试发送后立即切换会话、切换应用或最小化窗口：应只有命名失败诊断，不能写入旧消息、对方消息或其他会话内容，且应用仍正常收到每一次 Enter。
+
+> 输入法候选读取现为多输入法注册表，当前仅豆包（`com.bytedance.inputmethod.doubaoime`）在表内。微信输入法已经本机结构可行性探测（`src/ominime/scripts/probe_ime.py --watch`）判定为 **NOT PROVEN**：其候选窗不通过 macOS 无障碍 API 暴露候选正文（仅能被 Quartz 窗口列表看到几何），因此不接入注册表，豆包行为不变；结论见 `docs/verification/wxime-candidate-feasibility.md`。微信输入法下的输入仍由发送后气泡确认与通用提交捕获覆盖。
 
 ## 配置
 
@@ -274,6 +276,7 @@ Kim 与微信使用独立的发送后链路：EventTap 只把原始 keyDown/keyU
 | `day_timezone` | `Asia/Shanghai` | “今日”、日报和统计使用的业务日时区。 |
 | `storage_timezone` | 当前环境时区或 `America/New_York` | 解释数据库无时区时间戳时使用的时区。 |
 | `ignored_apps` | 系统登录与安全界面 | 不记录指定 bundle ID 的应用。 |
+| `post_send_chat_all_apps` | `true` | 发送后气泡确认是否默认覆盖全应用；设为 `false` 退回仅 Kim/微信的白名单模式。 |
 
 修改配置后请重启 OmniMe。安装时也可以通过环境变量设置时区：
 
@@ -347,6 +350,26 @@ curl 'http://127.0.0.1:8001/api/capture/diagnostics?limit=20'
 - `shortcut_modifier`：使用了 Command 或 Control 组合键。
 - `suspected_whole_document`：读取内容异常大，疑似整篇文档或整页内容。
 - `no_trusted_content`：没有找到可信的提交内容。
+
+### Safari 部分输入只记录按键数
+
+Safari 网页输入控件不一定始终提供 `AXValue`。当前实验分支在
+`AXValue` 为空时，会尝试 macOS 的 `AXStringForRange` 参数化属性，
+但**仅在焦点已验证属于同一非密码文本输入控件、文本长度受限时启用**。
+不支持的网页仍可能保存为仅计数，不能从按键数还原原始中文。
+
+检查 Safari 的记录原因：
+
+```bash
+curl 'http://127.0.0.1:8001/api/capture/diagnostics?app_bundle_id=com.apple.Safari&limit=50'
+```
+
+`diagnostics` 中的 `verified_text_entry`、`ax_value_nonempty`、
+`snapshot_available`、`snapshot_same_field`、`ax_range_attempted`、
+`ax_range_available` 只记录布尔状态，不包含所输入的文字或网页内容。
+`selected_source=ax_range` 表示备用接口成功读取。
+`focused_role=null` 在该版本是隐私限制下的预期行为，不能据此认定焦点丢失。
+这些字段只对新采集的 Safari 记录生效，旧诊断不会补全。
 
 ### 没有记录到内容
 

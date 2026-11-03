@@ -9,7 +9,7 @@ import threading
 import time
 from typing import Callable, Iterable
 
-from .chat_bubble_capture import VisualBubbleSource
+from .chat_bubble_capture import VisualBubbleSource, bubble_profile_for_bundle
 from .chat_window_capture import WindowFrame, session_anchors_match
 from .kim_composer_capture import (
     NormalizedRect,
@@ -21,7 +21,6 @@ from .post_send_capture import (
     SendIntent,
     SourceResult,
 )
-from .wechat_composer_capture import WECHAT_BUNDLE_ID
 
 
 logger = logging.getLogger(__name__)
@@ -94,11 +93,7 @@ class AccessibilityBubbleSource:
                 failures[-1] if failures else "ax_message_unavailable"
             )
         candidate = min(candidates, key=lambda node: node.bounds.y)
-        source_prefix = (
-            "wechat_postsend"
-            if intent.bundle_id == WECHAT_BUNDLE_ID
-            else "kim_postsend"
-        )
+        source_prefix = bubble_profile_for_bundle(intent.bundle_id).source_prefix
         return SourceResult.success(
             candidate.text.strip(),
             f"{source_prefix}_ax",
@@ -159,7 +154,14 @@ class AccessibilityBubbleSource:
 
 
 class _NativeAXNodeProvider:
-    """Fail closed until native AX can supply complete trust evidence."""
+    """Fail closed until native AX can supply complete trust evidence.
+
+    The default path therefore trusts only two evidence kinds: per-app tuned AX
+    adapters (injected node providers) and the visual OCR gate that requires an
+    exact match against the submitted text.  A generic traversal cannot prove
+    newness, session ownership, or bubble geometry for arbitrary apps, so it
+    stays disabled for every bundle, including generic post-send capture.
+    """
 
     def __init__(self, *, clock: Callable[[], float], max_nodes: int = 128):
         self._clock = clock

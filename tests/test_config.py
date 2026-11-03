@@ -54,3 +54,25 @@ def test_explicit_ai_environment_overrides_saved_local_preference(tmp_path, monk
     config = AppConfig.load(path)
 
     assert config.ai_enabled is True
+
+
+def test_post_send_chat_all_apps_roundtrip_and_rollback(tmp_path):
+    config = AppConfig(
+        data_dir=tmp_path,
+        db_path=tmp_path / "ominime.db",
+        log_dir=tmp_path / "logs",
+    )
+    assert config.post_send_chat_all_apps is True
+
+    path = tmp_path / "config.json"
+    config.post_send_chat_all_apps = False
+    config.save(path)
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["post_send_chat_all_apps"] is False
+    restored = AppConfig.load(path)
+    assert restored.post_send_chat_all_apps is False
+
+    # A pre-existing config without the key keeps the default-on semantics.
+    path.write_text('{"ai_enabled": false}', encoding="utf-8")
+    assert AppConfig.load(path).post_send_chat_all_apps is True

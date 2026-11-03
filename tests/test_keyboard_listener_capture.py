@@ -258,7 +258,9 @@ def test_prepare_activated_chat_schedules_one_warm_baseline_per_activation(monke
     listener._prepare_activated_composer("Notes", "com.apple.Notes", 777)
     listener._prepare_activated_composer("Kim", "Kem", 39522)
 
-    assert sampler.scheduled == [39522, 39522]
+    # 泛化后全 app 默认开启：Notes 激活同样调度一次 warm baseline。
+    assert listener._target_app_identities[777] == ("Notes", "com.apple.Notes")
+    assert sampler.scheduled == [39522, 777, 39522]
 
 
 def test_postsend_enter_waits_for_cold_native_baseline(monkeypatch):
@@ -420,6 +422,148 @@ def test_postsend_worker_creates_one_intent_after_chat_gates(monkeypatch):
     assert intent.physical_key_count == 2
     assert intent.baseline.session_anchor == "session-a"
     assert sampler.taken == [123]
+
+
+def test_postsend_generic_app_creates_intent_after_chat_gates(monkeypatch):
+    keyboard_listener, _ = import_keyboard_listener(monkeypatch)
+    coordinator = FakePostSendCoordinator()
+    sampler = FakeBaselineSampler()
+    listener = keyboard_listener.KeyboardListener(
+        lambda event: None,
+        post_send_coordinator=coordinator,
+        baseline_sampler=sampler,
+    )
+    configure_listener_context(listener, status="degraded", secure=False)
+    monkeypatch.setattr(
+        keyboard_listener,
+        "get_app_by_pid",
+        lambda pid: ("随便什么", "com.example.unknown"),
+    )
+    listener._fallback_buffers[("随便什么", "com.example.unknown")] = ["a", "b"]
+    listener._fallback_buffer_updated_at[("随便什么", "com.example.unknown")] = (
+        time.monotonic()
+    )
+
+    listener._process_raw_event(
+        keyboard_listener.RawKeyboardEvent(
+            event_type=keyboard_listener.kCGEventKeyDown,
+            keycode=keyboard_listener.ENTER_KEYCODE,
+            text="",
+            app_name="随便什么",
+            bundle_id="com.example.unknown",
+            modifiers={"shift": False, "ctrl": False, "alt": False, "cmd": False},
+            target_pid=123,
+            occurred_at=10.0,
+        )
+    )
+
+    assert len(coordinator.submitted) == 1
+    intent = coordinator.submitted[0]
+    assert intent.bundle_id == "com.example.unknown"
+    assert intent.baseline.session_anchor == "session-a"
+    assert sampler.taken == [123]
+
+
+def test_postsend_generic_app_warms_baseline_on_activation(monkeypatch):
+    keyboard_listener, _ = import_keyboard_listener(monkeypatch)
+    sampler = FakeBaselineSampler()
+    listener = keyboard_listener.KeyboardListener(
+        lambda event: None,
+        post_send_coordinator=FakePostSendCoordinator(),
+        baseline_sampler=sampler,
+    )
+
+    listener._prepare_activated_composer("随便什么", "com.example.unknown", 777)
+
+    assert listener._target_app_identities[777] == ("随便什么", "com.example.unknown")
+    assert sampler.scheduled == [777]
+
+
+def test_postsend_rollback_switch_restores_whitelist_only(monkeypatch):
+    keyboard_listener, _ = import_keyboard_listener(monkeypatch)
+    coordinator = FakePostSendCoordinator()
+    listener = keyboard_listener.KeyboardListener(
+        lambda event: None,
+        post_send_coordinator=coordinator,
+        baseline_sampler=FakeBaselineSampler(),
+    )
+    configure_listener_context(listener, status="degraded", secure=False)
+    monkeypatch.setattr(keyboard_listener.config, "post_send_chat_all_apps", False)
+    snapshot_calls = []
+    listener._emit_submission_snapshot = lambda *args, **kwargs: snapshot_calls.append(
+        kwargs
+    )
+    monkeypatch.setattr(
+        keyboard_listener,
+        "get_app_by_pid",
+        lambda pid: ("随便什么", "com.example.unknown"),
+    )
+
+    listener._process_raw_event(
+        keyboard_listener.RawKeyboardEvent(
+            event_type=keyboard_listener.kCGEventKeyDown,
+            keycode=keyboard_listener.ENTER_KEYCODE,
+            text="",
+            app_name="随便什么",
+            bundle_id="com.example.unknown",
+            modifiers={"shift": False, "ctrl": False, "alt": False, "cmd": False},
+            target_pid=123,
+            occurred_at=10.0,
+        )
+    )
+
+    assert coordinator.submitted == []
+    assert len(snapshot_calls) == 1
+
+
+def test_postsend_generic_app_without_baseline_falls_back_to_ax_capture(monkeypatch):
+    keyboard_listener, _ = import_keyboard_listener(monkeypatch)
+
+    class NoBaselineSampler(FakeBaselineSampler):
+        def take_baseline(self, target_pid, wait_timeout=0.0):
+            self.taken.append(target_pid)
+            self.take_waits.append(wait_timeout)
+            return None
+
+    coordinator = FakePostSendCoordinator()
+    sampler = NoBaselineSampler()
+    listener = keyboard_listener.KeyboardListener(
+        lambda event: None,
+        post_send_coordinator=coordinator,
+        baseline_sampler=sampler,
+    )
+    configure_listener_context(listener, status="ok", secure=False)
+    snapshot_calls = []
+    listener._emit_submission_snapshot = lambda *args, **kwargs: snapshot_calls.append(
+        kwargs
+    )
+    monkeypatch.setattr(
+        keyboard_listener,
+        "get_app_by_pid",
+        lambda pid: ("随便什么", "com.example.unknown"),
+    )
+
+    listener._process_raw_event(
+        keyboard_listener.RawKeyboardEvent(
+            event_type=keyboard_listener.kCGEventKeyDown,
+            keycode=keyboard_listener.ENTER_KEYCODE,
+            text="",
+            app_name="随便什么",
+            bundle_id="com.example.unknown",
+            modifiers={"shift": False, "ctrl": False, "alt": False, "cmd": False},
+            target_pid=123,
+            occurred_at=10.0,
+        )
+    )
+
+    # 泛化后全 app 都进发送后链路；非聊天 app 常没有聊天窗基线。
+    # 无基线时必须不建 doomed intent，回退到普通 AXValue 提交捕获，
+    # 保住通用 Enter 提交捕获语义（这是 all-apps 泛化的硬约束）。
+    assert coordinator.submitted == []
+    assert sampler.taken == [123]
+    assert len(snapshot_calls) == 1
+    assert snapshot_calls[0]["target_pid"] == 123
+    assert "captured_context" in snapshot_calls[0]
 
 
 @pytest.mark.parametrize("secure", (True, False))
@@ -2925,7 +3069,9 @@ def test_doubao_composition_is_cleared_on_context_change(monkeypatch, clear_kind
 
     listener._process_raw_event(event)
 
-    assert listener._doubao_states == {}
+    # 泛化后候选状态机不再限 Kim/微信：切到其它 app 会为其新建合法状态（reader 仍受输入法注册表 + 几何门 fail-closed），
+    # 但旧 Kim 输入组合必须随上下文切换被清除，不得泄漏到新目标。
+    assert ("Kim", "Kem") not in listener._doubao_states
 
 
 def test_doubao_secure_enter_discards_candidate(monkeypatch):
@@ -2990,7 +3136,10 @@ def test_non_ocr_keyup_keeps_snapshot_and_candidate_refresh(monkeypatch):
     )
 
     assert snapshot_calls == [
-        (("Codex", "com.openai.codex"), {"clear_on_empty": False})
+        (
+            ("Codex", "com.openai.codex"),
+            {"clear_on_empty": False, "target_pid": 123},
+        )
     ]
     assert candidate_calls == [
         (
@@ -3027,3 +3176,70 @@ def configure_listener_context(listener, *, status="degraded", secure=False):
         "capture_status": context.capture_status,
         "capture_error": context.capture_error,
     }
+
+
+def test_safari_enter_uses_verified_ax_range_when_ax_value_is_empty(monkeypatch):
+    keyboard_listener, _ = import_keyboard_listener(monkeypatch)
+    from ominime.context_capture import CapturedContext, focused_field_identity
+
+    events = []
+    listener = keyboard_listener.KeyboardListener(events.append)
+    context = CapturedContext(
+        focused_role="AXTextField",
+        focused_identifier="prompt-test",
+        window_title="Test",
+        focused_value="",
+        capture_status="ok",
+    )
+    app_name, bundle_id = "Safari", "com.apple.Safari"
+    key = listener._fallback_buffer_key(app_name, bundle_id)
+    listener._active_field_ids[key] = focused_field_identity(context)
+    calls = []
+    monkeypatch.setattr(
+        keyboard_listener, "read_focused_text_via_range",
+        lambda pid, max_chars: calls.append((pid, max_chars)) or "今天天气不错",
+    )
+
+    listener._emit_submission_snapshot(
+        None, app_name=app_name, bundle_id=bundle_id,
+        event_type=keyboard_listener.kCGEventKeyDown, target_pid=4321,
+        captured_context=context,
+    )
+
+    assert calls == [(4321, keyboard_listener.MAX_TRUSTED_SUBMISSION_CHARS)]
+    assert len(events) == 1
+    assert events[0].character == "今天天气不错"
+    assert events[0].modifiers["fallback_source"] == "ax_range"
+    assert events[0].modifiers["capture_diagnostics"]["ax_range_available"] is True
+
+
+def test_safari_range_fallback_refuses_unverified_field_switch(monkeypatch):
+    keyboard_listener, _ = import_keyboard_listener(monkeypatch)
+    from ominime.context_capture import CapturedContext
+
+    events = []
+    diagnostics = []
+    listener = keyboard_listener.KeyboardListener(
+        events.append, diagnostics_callback=diagnostics.append
+    )
+    context = CapturedContext(
+        focused_role="AXTextField",
+        focused_identifier="different-field",
+        window_title="Test",
+        focused_value="",
+        capture_status="ok",
+    )
+    key = listener._fallback_buffer_key("Safari", "com.apple.Safari")
+    listener._active_field_ids[key] = "id:Test:previous-field"
+
+    def forbidden_range(*args, **kwargs):
+        raise AssertionError("must not copy text from an unverified field")
+
+    monkeypatch.setattr(keyboard_listener, "read_focused_text_via_range", forbidden_range)
+    listener._emit_submission_snapshot(
+        None, app_name="Safari", bundle_id="com.apple.Safari",
+        event_type=keyboard_listener.kCGEventKeyDown, target_pid=4321,
+        captured_context=context,
+    )
+    assert events == []
+    assert diagnostics[-1]["decision_reason"] == "no_trusted_content"

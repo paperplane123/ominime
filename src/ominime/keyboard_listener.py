@@ -64,13 +64,13 @@ from .context_capture import (
     focused_field_identity,
     is_secure_text_entry_context,
     is_text_entry_context,
+    read_focused_text_via_range,
 )
 from .input_snapshot import format_submission_terminal_notice, normalize_submission_text
 from .ime_candidate_capture import (
-    DoubaoCandidateReader,
+    IMECandidateReader,
     DoubaoCompositionState,
     NUMBER_KEYCODE_TO_INDEX,
-    SUPPORTED_TARGET_BUNDLE_IDS,
 )
 from .kim_composer_capture import LEGACY_KIM_BUNDLE_ID
 from .wechat_composer_capture import WECHAT_BUNDLE_ID
@@ -295,7 +295,30 @@ BROWSER_BUNDLE_HINTS = (
     "safari",
     "vivaldi",
 )
-POST_SEND_CHAT_BUNDLE_IDS = frozenset({LEGACY_KIM_BUNDLE_ID, WECHAT_BUNDLE_ID})
+# Kim/微信保留逐 app 调过的专属行为（粘贴验证链、窗口重建豁免、候选刷新排除）。
+TUNDED_CHAT_BUNDLE_IDS = frozenset({
+    LEGACY_KIM_BUNDLE_ID,
+    WECHAT_BUNDLE_ID,
+    "com.tencent.WeChat",
+    "com.electron.kim",
+    "Kim",
+})
+POST_SEND_CHAT_BUNDLE_IDS = TUNDED_CHAT_BUNDLE_IDS
+
+
+def _is_tuned_chat_bundle(bundle_id: str) -> bool:
+    return bundle_id in TUNDED_CHAT_BUNDLE_IDS
+
+
+def _post_send_capture_enabled(bundle_id: str) -> bool:
+    """发送后气泡捕获准入：默认全 app；回滚开关下退回 Kim/微信白名单。"""
+    if config.is_app_ignored(bundle_id):
+        return False
+    if not getattr(config, "post_send_chat_all_apps", True):
+        return _is_tuned_chat_bundle(bundle_id)
+    return True
+
+
 POST_SEND_BASELINE_WAIT_SECONDS = 0.5
 
 
@@ -683,7 +706,7 @@ class KeyboardListener:
         self,
         callback: Callable[[KeyEvent], None],
         diagnostics_callback: Optional[Callable[[dict], None]] = None,
-        candidate_reader: DoubaoCandidateReader | None = None,
+        candidate_reader: IMECandidateReader | None = None,
         post_send_coordinator: PostSendCaptureCoordinator | None = None,
         baseline_sampler: ChatWindowBaselineSampler | None = None,
     ):
@@ -721,7 +744,7 @@ class KeyboardListener:
             tuple[str, str], tuple[int, str, float]
         ] = {}
         self._pending_enter_keyups: set[tuple[str, str]] = set()
-        self._candidate_reader = candidate_reader or DoubaoCandidateReader()
+        self._candidate_reader = candidate_reader or IMECandidateReader()
         self._post_send_coordinator = post_send_coordinator
         self._baseline_sampler = baseline_sampler
         self._owns_post_send_coordinator = post_send_coordinator is None
@@ -772,12 +795,12 @@ class KeyboardListener:
             return
         warmed_target = (
             (app_name, bundle_id, target_pid)
-            if bundle_id in POST_SEND_CHAT_BUNDLE_IDS
+            if _post_send_capture_enabled(bundle_id)
             else None
         )
         previous_warmed_target = self._last_warmed_post_send_target
         self._last_warmed_post_send_target = warmed_target
-        if bundle_id in POST_SEND_CHAT_BUNDLE_IDS:
+        if _post_send_capture_enabled(bundle_id):
             self._target_app_identities[target_pid] = (app_name, bundle_id)
             if warmed_target != previous_warmed_target:
                 self._schedule_post_send_baseline(app_name, bundle_id, target_pid)
@@ -871,7 +894,7 @@ class KeyboardListener:
         app_name: str,
         bundle_id: str,
     ) -> DoubaoCompositionState | None:
-        if bundle_id not in SUPPORTED_TARGET_BUNDLE_IDS:
+        if config.is_app_ignored(bundle_id or "unknown"):
             return None
         key = self._fallback_buffer_key(app_name, bundle_id)
         state = self._doubao_states.get(key)
@@ -891,7 +914,7 @@ class KeyboardListener:
     ):
         target = (
             (app_name, bundle_id, target_pid)
-            if bundle_id in SUPPORTED_TARGET_BUNDLE_IDS and target_pid > 0
+            if bundle_id and not config.is_app_ignored(bundle_id) and target_pid > 0
             else None
         )
         if self._last_doubao_target is not None and target != self._last_doubao_target:
@@ -1150,10 +1173,13 @@ class KeyboardListener:
         return content
 
     def _record_recent_text_snapshot(
-        self, app_name: str, bundle_id: str, *, clear_on_empty: bool = False
+        self, app_name: str, bundle_id: str, *, clear_on_empty: bool = False,
+        target_pid: int = 0,
     ):
         key = self._fallback_buffer_key(app_name, bundle_id)
-        context = self._capture_focused_context(max_depth=1)
+        context = self._capture_focused_context(
+            max_depth=1, target_pid=target_pid if target_pid > 0 else None
+        )
         if not is_text_entry_context(context):
             self._recent_text_snapshots.pop(key, None)
             return
@@ -1174,6 +1200,14 @@ class KeyboardListener:
         focused_value = getattr(context, "focused_value", None)
         if not isinstance(focused_value, str):
             focused_value = self._get_focused_text_snapshot()
+        if (
+            not focused_value
+            and bundle_id == "com.apple.Safari"
+            and target_pid > 0
+        ):
+            focused_value = read_focused_text_via_range(
+                target_pid, max_chars=MAX_TRUSTED_SUBMISSION_CHARS
+            )
         content = normalize_submission_text(
             focused_value,
             app_name=app_name,
@@ -1575,6 +1609,31 @@ class KeyboardListener:
             )
             return
 
+        baseline = (
+            self._baseline_sampler.take_baseline(
+                target_pid,
+                wait_timeout=POST_SEND_BASELINE_WAIT_SECONDS,
+            )
+            if self._baseline_sampler is not None
+            else None
+        )
+        if baseline is None and not _is_tuned_chat_bundle(bundle_id):
+            # 泛化后全 app 都会进入发送后链路，但非聊天 app 往往没有聊天窗基线。
+            # 对非 tuned 聊天 app，无基线时不提交注定失败的 intent，而回退到
+            # 既有的普通 AXValue 提交捕获，保持通用 Enter 提交捕获语义不变（这是
+            # all-apps 泛化的硬约束）。tuned 聊天 app（Kim/微信）维持原有“无基线→
+            # 气泡失败丢弃”语义不变。
+            self._emit_submission_snapshot(
+                None,
+                app_name=app_name,
+                bundle_id=bundle_id,
+                key_modifiers=raw_event.modifiers,
+                event_type=raw_event.event_type,
+                target_pid=target_pid,
+                captured_context=context,
+            )
+            return
+
         validation_key = self._fallback_buffer_key(app_name, bundle_id)
         validation_tainted = validation_key in self._tainted_post_send_validation_keys
         if validation_tainted:
@@ -1616,14 +1675,6 @@ class KeyboardListener:
                 app_name=app_name,
                 bundle_id=bundle_id,
             )
-        )
-        baseline = (
-            self._baseline_sampler.take_baseline(
-                target_pid,
-                wait_timeout=POST_SEND_BASELINE_WAIT_SECONDS,
-            )
-            if self._baseline_sampler is not None
-            else None
         )
         self._clear_submission_buffers(app_name, bundle_id)
         intent_id = uuid.uuid4().hex
@@ -1836,9 +1887,9 @@ class KeyboardListener:
             return
 
         text_entry_context = is_text_entry_context(context)
-        self._active_field_ids[self._fallback_buffer_key(app_name, bundle_id)] = (
-            current_field_id
-        )
+        field_key = self._fallback_buffer_key(app_name, bundle_id)
+        previously_active_field_id = self._active_field_ids.get(field_key)
+        self._active_field_ids[field_key] = current_field_id
         ax_content = ""
         if text_entry_context:
             focused_value = getattr(context, "focused_value", None)
@@ -1872,6 +1923,49 @@ class KeyboardListener:
         fallback_source = None
         physical_key_count = None
         capture_diagnostics = None
+
+        if bundle_id == "com.apple.Safari":
+            # Do not persist text or AX element identity in diagnostics.
+            snapshot = self._recent_text_snapshots.get(
+                self._fallback_buffer_key(app_name, bundle_id)
+            )
+            snapshot_field_id = (
+                snapshot[2] if snapshot is not None and len(snapshot) > 2 else None
+            )
+            capture_diagnostics = {
+                "verified_text_entry": bool(text_entry_context),
+                "ax_value_nonempty": bool(ax_content),
+                "snapshot_available": snapshot is not None,
+                "snapshot_same_field": bool(
+                    current_field_id is not None
+                    and snapshot_field_id is not None
+                    and current_field_id == snapshot_field_id
+                ),
+                "ax_range_attempted": False,
+                "ax_range_available": False,
+            }
+            # Only trust the range reader if the previous typing event and
+            # this Enter belong to the same, identifiable focused field.
+            if (
+                text_entry_context
+                and not content
+                and target_pid is not None
+                and target_pid > 0
+                and current_field_id is not None
+                and previously_active_field_id == current_field_id
+            ):
+                capture_diagnostics["ax_range_attempted"] = True
+                range_content = normalize_submission_text(
+                    read_focused_text_via_range(
+                        target_pid, max_chars=MAX_TRUSTED_SUBMISSION_CHARS
+                    ),
+                    app_name=app_name,
+                    bundle_id=bundle_id,
+                )
+                if range_content:
+                    content = range_content
+                    fallback_source = "ax_range"
+                    capture_diagnostics["ax_range_available"] = True
         if (
             text_entry_context
             and fallback_source != "doubao_candidate_text"
@@ -1999,7 +2093,7 @@ class KeyboardListener:
     ) -> tuple[str, str, int]:
         sampled_identity = (raw_event.app_name, raw_event.bundle_id)
         if (
-            raw_event.bundle_id in SUPPORTED_TARGET_BUNDLE_IDS
+            _post_send_capture_enabled(raw_event.bundle_id)
             and raw_event.frontmost_pid > 0
             and self._target_app_identities.get(raw_event.frontmost_pid)
             == sampled_identity
@@ -2045,7 +2139,7 @@ class KeyboardListener:
             return
 
         if (
-            bundle_id in SUPPORTED_TARGET_BUNDLE_IDS
+            _post_send_capture_enabled(bundle_id)
             and event_type == kCGEventKeyDown
             and (
                 modifiers.get("cmd")
@@ -2055,7 +2149,7 @@ class KeyboardListener:
             )
         ):
             if (
-                bundle_id in POST_SEND_CHAT_BUNDLE_IDS
+                _is_tuned_chat_bundle(bundle_id)
                 and keycode == 9
                 and modifiers.get("cmd")
                 and not modifiers.get("ctrl")
@@ -2080,8 +2174,8 @@ class KeyboardListener:
             return
 
         if event_type == kCGEventKeyUp and keycode != ENTER_KEYCODE:
-            if bundle_id not in POST_SEND_CHAT_BUNDLE_IDS or (
-                bundle_id in POST_SEND_CHAT_BUNDLE_IDS
+            if not _is_tuned_chat_bundle(bundle_id) or (
+                _is_tuned_chat_bundle(bundle_id)
                 and keycode == 9
                 and modifiers.get("cmd")
                 and not modifiers.get("ctrl")
@@ -2091,8 +2185,9 @@ class KeyboardListener:
                     app_name,
                     bundle_id,
                     clear_on_empty=keycode in (51, 117),
+                    target_pid=application_pid,
                 )
-                if bundle_id in POST_SEND_CHAT_BUNDLE_IDS and keycode == 9:
+                if _is_tuned_chat_bundle(bundle_id) and keycode == 9:
                     self._record_post_send_paste_validation(app_name, bundle_id)
             self._record_text_fallback_key(
                 app_name,
@@ -2111,7 +2206,7 @@ class KeyboardListener:
                     modifiers,
                 )
         if event_type == kCGEventKeyDown and keycode != ENTER_KEYCODE:
-            if bundle_id in POST_SEND_CHAT_BUNDLE_IDS:
+            if _is_tuned_chat_bundle(bundle_id):
                 key = self._fallback_buffer_key(app_name, bundle_id)
                 if key in self._post_send_paste_snapshot_keys:
                     self._tainted_post_send_validation_keys.add(key)
@@ -2143,7 +2238,7 @@ class KeyboardListener:
             )
 
         if (
-            bundle_id in POST_SEND_CHAT_BUNDLE_IDS
+            _post_send_capture_enabled(bundle_id)
             and event_type == kCGEventKeyDown
             and keycode != ENTER_KEYCODE
             and not raw_event.is_autorepeat
@@ -2161,7 +2256,7 @@ class KeyboardListener:
         ):
             return
         if (
-            bundle_id in POST_SEND_CHAT_BUNDLE_IDS
+            _post_send_capture_enabled(bundle_id)
             and self._post_send_coordinator is not None
         ):
             if event_type != kCGEventKeyDown or raw_event.is_autorepeat:

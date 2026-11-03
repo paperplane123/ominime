@@ -167,6 +167,14 @@ def test_wechat_accessibility_source_uses_explicit_source_name():
     assert result.source == "wechat_postsend_ax"
 
 
+def test_unknown_bundle_accessibility_source_uses_generic_prefix():
+    source = AccessibilityBubbleSource(node_provider=lambda pid: (_node(),))
+
+    result = source.read(_intent(bundle_id="com.example.unknown"))
+
+    assert result.source == "generic_postsend_ax"
+
+
 def test_default_sources_are_ax_then_vision_without_network_probe(monkeypatch):
     network_calls = []
     monkeypatch.setattr(
