@@ -1,4 +1,4 @@
-"""Capture and model trusted Doubao input-method candidate selections."""
+"""Capture and model trusted IME candidate selections for registered input methods."""
 
 import time
 import ctypes
@@ -11,7 +11,6 @@ from typing import Callable, Iterable
 
 
 DOUBAO_BUNDLE_ID = "com.bytedance.inputmethod.doubaoime"
-SUPPORTED_TARGET_BUNDLE_IDS = frozenset({"Kem", "com.tencent.xinWeChat"})
 COMPOSER_TOP_FRACTION = 0.55
 MAX_COMPOSED_CHARS = 4000
 INPUT_SOURCE_CACHE_TTL_SECONDS = 1.0
@@ -28,6 +27,30 @@ NUMBER_KEYCODE_TO_INDEX = {
     28: 7,
     25: 8,
 }
+
+
+@dataclass(frozen=True)
+class ImeCandidateProfile:
+    """One registered input method whose candidate window can be read."""
+
+    name: str
+    bundle_id: str
+
+
+IME_CANDIDATE_PROFILES = {
+    DOUBAO_BUNDLE_ID: ImeCandidateProfile(name="doubao", bundle_id=DOUBAO_BUNDLE_ID),
+}
+
+
+def default_ime_profile_resolver(input_source_bundle_id: str) -> ImeCandidateProfile | None:
+    """Resolve the active input source against the registered profile table.
+
+    A new input method (for example the WeChat IME) joins this registry only
+    after the local probe proves its candidate window exposes the same
+    AXStaticText + window-bounds contract that the composer geometry gate
+    requires.
+    """
+    return IME_CANDIDATE_PROFILES.get(input_source_bundle_id or "")
 
 
 @dataclass(frozen=True)
@@ -229,8 +252,8 @@ def cached_input_source_bundle_id(
     return bundle_id
 
 
-class DoubaoCandidateReader:
-    """Read candidates only when Doubao is anchored to a supported composer."""
+class IMECandidateReader:
+    """Read candidates only for a registered input source anchored over the target."""
 
     def __init__(
         self,
@@ -263,26 +286,30 @@ class DoubaoCandidateReader:
         *,
         target_pid: int,
         target_bundle_id: str,
+        profile_resolver: Callable[[str], ImeCandidateProfile | None] | None = None,
     ) -> CandidateSnapshot | None:
         self.last_failure_reason = None
-        if target_pid <= 0 or target_bundle_id not in SUPPORTED_TARGET_BUNDLE_IDS:
-            return self._fail("unsupported_target")
+        if target_pid <= 0 or not target_bundle_id:
+            return self._fail("missing_target")
+        resolve = profile_resolver or default_ime_profile_resolver
         try:
-            if self._input_source_provider() != DOUBAO_BUNDLE_ID:
+            input_source_bundle_id = self._input_source_provider()
+            profile = resolve(input_source_bundle_id)
+            if profile is None:
                 return self._fail("input_source_mismatch")
-            doubao_pid = next(
+            ime_pid = next(
                 (
                     int(pid)
                     for bundle_id, pid in self._process_provider()
-                    if bundle_id == DOUBAO_BUNDLE_ID and int(pid) > 0
+                    if bundle_id == profile.bundle_id and int(pid) > 0
                 ),
                 0,
             )
-            if doubao_pid <= 0:
-                return self._fail("doubao_process_unavailable")
+            if ime_pid <= 0:
+                return self._fail("ime_process_unavailable")
             candidate_roots = []
             missing_candidate_bounds = False
-            for root in self._ax_roots_provider(doubao_pid):
+            for root in self._ax_roots_provider(ime_pid):
                 values = collect_static_text_values(
                     (root,),
                     self._attribute_reader,
@@ -418,6 +445,10 @@ class DoubaoCandidateReader:
             if pid > 0 and rect.width > 0 and rect.height > 0:
                 records.append(WindowRecord(pid=pid, bounds=rect))
         return tuple(records)
+
+
+# Legacy alias: the Doubao-only reader generalised to the profile registry.
+DoubaoCandidateReader = IMECandidateReader
 
 
 class DoubaoCompositionState:

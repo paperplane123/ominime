@@ -8,10 +8,13 @@ from ominime.ime_candidate_capture import (
     DOUBAO_BUNDLE_ID,
     DoubaoCandidateReader,
     DoubaoCompositionState,
+    IMECandidateReader,
+    ImeCandidateProfile,
     Rect,
     WindowRecord,
     candidate_is_in_composer,
     collect_static_text_values,
+    default_ime_profile_resolver,
     object_sequence,
     rect_from_window_bounds,
 )
@@ -371,7 +374,7 @@ def make_reader(
         WindowRecord(pid=88, bounds=candidate_bounds),
         WindowRecord(pid=123, bounds=Rect(2000, 100, 1200, 800)),
     ]
-    return DoubaoCandidateReader(
+    return IMECandidateReader(
         clock=clock,
         input_source_provider=lambda: input_source_bundle,
         process_provider=lambda: processes,
@@ -382,14 +385,51 @@ def make_reader(
     )
 
 
-def test_reader_rejects_unsupported_target_without_native_queries():
-    calls = []
-    reader = DoubaoCandidateReader(process_provider=lambda: calls.append(True))
+def test_reader_accepts_unknown_target_bundle_and_keeps_geometry_gate():
+    clock = FakeClock()
+    reader = make_reader(clock)
 
-    snapshot = reader.read(target_pid=123, target_bundle_id="com.example.Other")
+    snapshot = reader.read(target_pid=123, target_bundle_id="com.example.unknown")
+
+    assert snapshot == CandidateSnapshot(("测试", "策士"), 123, clock())
+
+
+def test_reader_rejects_unknown_target_by_composer_geometry():
+    clock = FakeClock()
+    reader = make_reader(clock, candidate_bounds=Rect(2500, 180, 400, 64))
+
+    snapshot = reader.read(target_pid=123, target_bundle_id="com.example.unknown")
 
     assert snapshot is None
-    assert calls == []
+    assert reader.last_failure_reason == "candidate_outside_composer"
+
+
+def test_registry_resolves_registered_and_unregistered_input_sources():
+    assert default_ime_profile_resolver(DOUBAO_BUNDLE_ID) is not None
+    assert default_ime_profile_resolver("com.apple.keylayout.ABC") is None
+
+
+def test_reader_supports_injected_second_ime_profile():
+    clock = FakeClock()
+    synthetic_profile = ImeCandidateProfile(
+        name="otherime",
+        bundle_id="com.example.inputmethod.otherime",
+    )
+    reader = make_reader(
+        clock,
+        processes=((synthetic_profile.bundle_id, 88),),
+        input_source_bundle=synthetic_profile.bundle_id,
+    )
+
+    snapshot = reader.read(
+        target_pid=123,
+        target_bundle_id="com.example.unknown",
+        profile_resolver=lambda bundle_id: (
+            synthetic_profile if bundle_id == synthetic_profile.bundle_id else None
+        ),
+    )
+
+    assert snapshot == CandidateSnapshot(("测试", "策士"), 123, clock())
 
 
 def test_reader_requires_exact_doubao_process_bundle():
@@ -418,7 +458,7 @@ def test_reader_default_uses_cached_input_source_without_native_read(monkeypatch
     reader = DoubaoCandidateReader(process_provider=lambda: ())
 
     assert reader.read(target_pid=123, target_bundle_id="Kem") is None
-    assert reader.last_failure_reason == "doubao_process_unavailable"
+    assert reader.last_failure_reason == "ime_process_unavailable"
 
 
 def test_reader_requires_doubao_to_be_current_input_source():

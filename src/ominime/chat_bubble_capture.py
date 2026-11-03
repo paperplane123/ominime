@@ -14,6 +14,7 @@ from .kim_composer_capture import (
     KIM_CHAT_HEADER_FRACTION,
     KIM_CHAT_RIGHT_MARGIN_FRACTION,
     KIM_CHAT_SIDEBAR_FRACTION,
+    LEGACY_KIM_BUNDLE_ID,
     NormalizedRect,
     RecognizedLine,
     VisionTextRecognizer,
@@ -87,6 +88,39 @@ KIM_BUBBLE_PROFILE = BubbleProfile("kim", "kim_postsend", _kim_bounds)
 WECHAT_BUBBLE_PROFILE = BubbleProfile(
     "wechat", "wechat_postsend", _wechat_bounds
 )
+
+# Conservative generic geometry: keep the whole window width (left-side panels
+# are filtered by the outgoing-right heuristic) and exclude a header band on
+# top plus a composer band at the bottom.
+GENERIC_HEADER_FRACTION = 0.04
+GENERIC_COMPOSER_FRACTION = 0.18
+
+
+def _generic_bounds(frame: WindowFrame) -> NormalizedRect:
+    return NormalizedRect(
+        0.0,
+        GENERIC_COMPOSER_FRACTION,
+        1.0,
+        1.0 - GENERIC_COMPOSER_FRACTION - GENERIC_HEADER_FRACTION,
+    )
+
+
+GENERIC_BUBBLE_PROFILE = BubbleProfile(
+    "generic", "generic_postsend", _generic_bounds
+)
+
+_BUBBLE_PROFILES = {
+    WECHAT_BUNDLE_ID: WECHAT_BUBBLE_PROFILE,
+    "com.tencent.WeChat": WECHAT_BUBBLE_PROFILE,
+    LEGACY_KIM_BUNDLE_ID: KIM_BUBBLE_PROFILE,
+    "com.electron.kim": KIM_BUBBLE_PROFILE,
+    "Kim": KIM_BUBBLE_PROFILE,
+}
+
+
+def bubble_profile_for_bundle(bundle_id: str) -> BubbleProfile:
+    """Route a bundle identifier to its tuned profile, or the generic one."""
+    return _BUBBLE_PROFILES.get(bundle_id or "", GENERIC_BUBBLE_PROFILE)
 
 
 class VisualBubbleSource:
@@ -175,9 +209,7 @@ class VisualBubbleSource:
 
     @staticmethod
     def _profile(intent: SendIntent) -> BubbleProfile:
-        if intent.bundle_id == WECHAT_BUNDLE_ID:
-            return WECHAT_BUBBLE_PROFILE
-        return KIM_BUBBLE_PROFILE
+        return bubble_profile_for_bundle(intent.bundle_id)
 
     def _result_for_lines(
         self,
